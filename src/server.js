@@ -9,6 +9,8 @@ const resolvers = require('./graphql/resolvers');
 const server = new ApolloServer({
     typeDefs,
     resolvers,
+    introspection: true,
+    playground: true,
     context: ({ req }) => {
         const authHeader = req.headers.authorization || '';
         const token = authHeader.replace('Bearer ', '');
