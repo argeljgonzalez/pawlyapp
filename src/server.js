@@ -5,7 +5,6 @@ const jwt = require('jsonwebtoken');
 
 const typeDefs = require('./graphql/typeDefs');
 const resolvers = require('./graphql/resolvers');
-const db = require('./database/db');
 
 const server = new ApolloServer({
     typeDefs,
@@ -24,13 +23,10 @@ const server = new ApolloServer({
             }
         }
 
-        return {
-            db,
-            user
-        };
+        return { user };
     }
 });
 
-server.listen().then(({ url }) => {
+server.listen({ port: process.env.PORT || 4000 }).then(({ url }) => {
     console.log(`Server ready at ${url}`);
 });
