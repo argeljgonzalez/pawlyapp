@@ -12,6 +12,11 @@ const typeDefs = gql`
         estado: String
     }
 
+    type AuthPayload {
+        token: String!
+        usuario: Usuario!
+    }
+
     type Raza {
         id_raza: Int!
         nombre_raza: String
@@ -121,6 +126,7 @@ const typeDefs = gql`
     type Query {
         usuarios: [Usuario]
         usuario(id_usuario: Int!): Usuario
+        me: Usuario
 
         razas: [Raza]
         raza(id_raza: Int!): Raza
@@ -157,6 +163,11 @@ const typeDefs = gql`
     }
 
     type Mutation {
+        login(
+            correo: String!,
+            contrasena: String!
+        ): AuthPayload!
+
         addUsuario(
             nombre: String!,
             apellido: String!,
@@ -178,7 +189,6 @@ const typeDefs = gql`
 
         deleteUsuario(id_usuario: Int!): String!
 
-
         addRaza(
             nombre_raza: String!,
             pais_origen: String,
@@ -199,7 +209,6 @@ const typeDefs = gql`
         ): Raza!
 
         deleteRaza(id_raza: Int!): String!
-
 
         addPerro(
             id_usuario: Int!,
@@ -226,7 +235,6 @@ const typeDefs = gql`
 
         deletePerro(id_perro: Int!): String!
 
-
         addUbicacion(
             id_perro: Int!,
             latitud: Float!,
@@ -244,7 +252,6 @@ const typeDefs = gql`
 
         deleteUbicacion(id_ubicacion: Int!): String!
 
-
         addTipoRecordatorio(
             nombre_tipo: String!,
             descripcion: String
@@ -257,7 +264,6 @@ const typeDefs = gql`
         ): TipoRecordatorio!
 
         deleteTipoRecordatorio(id_tipo_recordatorio: Int!): String!
-
 
         addRecordatorio(
             id_perro: Int!,
@@ -280,7 +286,6 @@ const typeDefs = gql`
 
         deleteRecordatorio(id_recordatorio: Int!): String!
 
-
         addCartillaVacunacion(
             id_perro: Int!,
             observaciones_generales: String,
@@ -295,7 +300,6 @@ const typeDefs = gql`
         ): CartillaVacunacion!
 
         deleteCartillaVacunacion(id_cartilla: Int!): String!
-
 
         addVacuna(
             nombre_vacuna: String!,
@@ -313,7 +317,6 @@ const typeDefs = gql`
         ): Vacuna!
 
         deleteVacuna(id_vacuna: Int!): String!
-
 
         addCartillaDetalle(
             id_cartilla: Int!,
@@ -342,7 +345,6 @@ const typeDefs = gql`
 
         deleteCartillaDetalle(id_detalle_cartilla: Int!): String!
 
-
         addCitaVeterinaria(
             id_perro: Int!,
             fecha_cita: String!,
@@ -366,7 +368,6 @@ const typeDefs = gql`
 
         deleteCitaVeterinaria(id_cita: Int!): String!
 
-
         addHistorialMedico(
             id_perro: Int!,
             tipo_registro: String!,
@@ -383,7 +384,6 @@ const typeDefs = gql`
         ): HistorialMedico!
 
         deleteHistorialMedico(id_historial: Int!): String!
-
 
         addPublicacion(
             id_usuario: Int!,

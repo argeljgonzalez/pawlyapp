@@ -1,3 +1,6 @@
+require('dotenv').config();
+
+const jwt = require('jsonwebtoken');
 const db = require('../../database/db');
 
 const cleanData = (data) => {
@@ -8,6 +11,19 @@ const cleanData = (data) => {
 
 const hasData = (data) => {
     return Object.keys(data).length > 0;
+};
+
+const generateToken = (usuario) => {
+    return jwt.sign(
+        {
+            id_usuario: usuario.id_usuario,
+            correo: usuario.correo
+        },
+        process.env.JWT_SECRET,
+        {
+            expiresIn: '1h'
+        }
+    );
 };
 
 const findOne = async (table, idField, idValue, selectFields = '*') => {
@@ -161,6 +177,19 @@ const publicacionFields = [
 
 const resolvers = {
     Query: {
+        me: async (_, __, context) => {
+            if (!context.user) {
+                throw new Error('No autorizado. Debes iniciar sesión.');
+            }
+
+            return await findOne(
+                'usuarios',
+                'id_usuario',
+                context.user.id_usuario,
+                usuarioFields
+            );
+        },
+
         usuarios: async () => {
             return await db('usuarios').select(usuarioFields);
         },
@@ -259,6 +288,28 @@ const resolvers = {
     },
 
     Mutation: {
+        login: async (_, { correo, contrasena }) => {
+            const usuario = await db('usuarios')
+                .select(usuarioFields)
+                .where({ correo })
+                .first();
+
+            if (!usuario) {
+                throw new Error('Usuario no encontrado.');
+            }
+
+            if (usuario.contrasena !== contrasena) {
+                throw new Error('Contraseña incorrecta.');
+            }
+
+            const token = generateToken(usuario);
+
+            return {
+                token,
+                usuario
+            };
+        },
+
         addUsuario: async (_, { nombre, apellido, correo, contrasena, telefono, estado }) => {
             return await insertAndReturn('usuarios', 'id_usuario', {
                 nombre,
