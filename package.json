@@ -4,7 +4,9 @@
     "dev": "node src/server.js",
     "test": "node --test test/*.test.js",
     "test:integration": "node scripts/integration-test.js",
-    "migrate:passwords": "node scripts/hash-legacy-passwords.js"
+    "migrate:passwords": "node scripts/hash-legacy-passwords.js",
+    "migrate:history": "node scripts/import-history.js",
+    "seed:demo": "node scripts/seed-demo.js"
   },
   "dependencies": {
     "@apollo/server": "^5.5.1",
@@ -18,8 +20,10 @@
     "helmet": "^8.3.0",
     "jsonwebtoken": "^9.0.3",
     "knex": "^3.2.10",
+    "mongoose": "^9.11.2",
     "mysql2": "^3.24.6",
-    "rate-limiter-flexible": "^11.2.3"
+    "rate-limiter-flexible": "^11.2.3",
+    "redis": "^5.12.1"
   },
   "private": true,
   "engines": {

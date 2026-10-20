@@ -12,6 +12,9 @@ const { contextForRequest } = require('./security/auth');
 const typeDefs = require('./graphql/typeDefs');
 const resolvers = require('./graphql/resolvers');
 const db = require('./database/db');
+const { connectMongo, closeMongo, mongoose } = require('./database/mongo');
+const { connectRedis, closeRedis, redisClient } = require('./database/redis');
+const { ApolloServerPluginLandingPageLocalDefault, ApolloServerPluginLandingPageDisabled } = require('@apollo/server/plugin/landingPage/default');
 
 // Count expanded selections, including aliases/fragments, before executing queries.
 const operationLimit = {
@@ -35,7 +38,7 @@ const operationLimit = {
 };
 function formatError(error) {
     const code = error.extensions?.code;
-    const safe = ['BAD_USER_INPUT', 'UNAUTHENTICATED', 'FORBIDDEN', 'NOT_FOUND', 'RATE_LIMITED', 'CONFLICT'];
+    const safe = ['BAD_USER_INPUT', 'UNAUTHENTICATED', 'FORBIDDEN', 'NOT_FOUND', 'RATE_LIMITED', 'CONFLICT', 'SERVICE_UNAVAILABLE'];
     if (safe.includes(code)) return { message: error.message, extensions: { code } };
     if (['GRAPHQL_PARSE_FAILED', 'GRAPHQL_VALIDATION_FAILED'].includes(code)) return { message: 'Consulta GraphQL inválida.', extensions: { code } };
     // SQL, traces and input values must never be returned to the client.
@@ -49,18 +52,26 @@ async function start() {
     const app = express();
     const httpServer = http.createServer(app);
     app.disable('x-powered-by');
-    app.use(helmet());
+    const sandbox = process.env.GRAPHQL_INTROSPECTION === 'true';
+    app.use(helmet({ contentSecurityPolicy: sandbox ? false : undefined }));
     const origins = (process.env.CORS_ORIGINS || 'http://localhost:3000,http://localhost:5173').split(',').map(x => x.trim());
     app.use(cors({ origin: origins }));
     app.use(rateLimit({ windowMs: 60000, limit: 120, standardHeaders: 'draft-8', legacyHeaders: false, message: { error: 'Demasiadas solicitudes. Inténtalo en un minuto.' } }));
+    await Promise.all([connectMongo(), connectRedis()]);
+    app.get('/health', async (req, res) => {
+        try {
+            await Promise.all([db.raw('SELECT 1'), mongoose.connection.db.command({ ping: 1 }), redisClient.ping()]);
+            res.json({ status: 'ok' });
+        } catch { res.status(503).json({ status: 'unavailable' }); }
+    });
     const server = new ApolloServer({
         typeDefs, resolvers,
         introspection: process.env.GRAPHQL_INTROSPECTION === 'true',
         includeStacktraceInErrorResponses: false,
         allowBatchedHttpRequests: false,
         formatError,
-        plugins: [operationLimit, ApolloServerPluginDrainHttpServer({ httpServer }), {
-            async serverWillStart() { return { async drainServer() { await db.destroy(); } }; }
+        plugins: [sandbox ? ApolloServerPluginLandingPageLocalDefault({ embed: true }) : ApolloServerPluginLandingPageDisabled(), operationLimit, ApolloServerPluginDrainHttpServer({ httpServer }), {
+            async serverWillStart() { return { async drainServer() { await Promise.all([db.destroy(), closeMongo(), closeRedis()]); } }; }
         }]
     });
     await server.start();

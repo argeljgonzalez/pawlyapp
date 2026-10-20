@@ -1,0 +1,104 @@
+{
+  "timestamp_utc": "2026-10-20T05:42:28.575Z",
+  "tests": "passed",
+  "mongo_first_ms": 0.608,
+  "redis_samples": 6,
+  "redis_min_ms": 0.032,
+  "redis_median_ms": 0.034,
+  "redis_max_ms": 0.04,
+  "all_redis_below_1_5_ms": true,
+  "measurements": [
+    {
+      "evento": "historial_lectura",
+      "fuente": "MongoDB",
+      "id_perro": 8,
+      "ms": 0.608,
+      "redis_miss_ms": 0.049
+    },
+    {
+      "evento": "historial_lectura",
+      "fuente": "Redis",
+      "id_perro": 8,
+      "ms": 0.032
+    },
+    {
+      "evento": "historial_lectura",
+      "fuente": "MongoDB",
+      "id_perro": 8,
+      "ms": 0.577,
+      "redis_miss_ms": 0.039
+    },
+    {
+      "evento": "historial_lectura",
+      "fuente": "MongoDB",
+      "id_perro": 10,
+      "ms": 0.616,
+      "redis_miss_ms": 0.039
+    },
+    {
+      "evento": "historial_lectura",
+      "fuente": "MongoDB",
+      "id_perro": 8,
+      "ms": 0.479,
+      "redis_miss_ms": 0.044
+    },
+    {
+      "evento": "historial_lectura",
+      "fuente": "MongoDB",
+      "id_perro": 8,
+      "ms": 0.414,
+      "redis_miss_ms": 0.037
+    },
+    {
+      "evento": "historial_lectura",
+      "fuente": "MongoDB",
+      "id_perro": 10,
+      "ms": 0.339,
+      "redis_miss_ms": 0.034
+    },
+    {
+      "evento": "historial_lectura",
+      "fuente": "MongoDB",
+      "id_perro": 10,
+      "ms": 0.397,
+      "redis_miss_ms": 0.035
+    },
+    {
+      "evento": "historial_lectura",
+      "fuente": "Redis",
+      "id_perro": 10,
+      "ms": 0.034
+    },
+    {
+      "evento": "historial_lectura",
+      "fuente": "Redis",
+      "id_perro": 10,
+      "ms": 0.034
+    },
+    {
+      "evento": "historial_lectura",
+      "fuente": "Redis",
+      "id_perro": 10,
+      "ms": 0.035
+    },
+    {
+      "evento": "historial_lectura",
+      "fuente": "Redis",
+      "id_perro": 10,
+      "ms": 0.04
+    },
+    {
+      "evento": "historial_lectura",
+      "fuente": "Redis",
+      "id_perro": 10,
+      "ms": 0.032
+    },
+    {
+      "evento": "historial_lectura",
+      "fuente": "MongoDB",
+      "id_perro": 10,
+      "ms": 1.722,
+      "redis_miss_ms": 5.295
+    }
+  ]
+}

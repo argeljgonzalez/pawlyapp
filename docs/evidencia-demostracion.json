@@ -1,0 +1,12 @@
+{
+  "timestamp_utc": "2026-10-20T14:07:56.017074+00:00",
+  "verification": "API GraphQL antes y despu\u00e9s de reiniciar MongoDB y Redis",
+  "demo_user_count": 1,
+  "pets": [
+    "Luna",
+    "Max"
+  ],
+  "medical_records_after_restart": 5,
+  "revoked_token_http_status_after_restart": 401,
+  "healthy_services": 5
+}

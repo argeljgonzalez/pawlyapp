@@ -1,7 +1,7 @@
 require('dotenv').config();
 
 const bcrypt = require('bcryptjs');
-const { hashPassword, generateToken, isHash, active } = require('../../security/auth');
+const { hashPassword, generateToken, isHash, active, logout } = require('../../security/auth');
 const { protect, limitAuth } = require('../../security/access');
 const { validate } = require('../../security/validation');
 const { fail } = require('../../security/errors');
@@ -149,15 +149,6 @@ const citaVeterinariaFields = [
     'estado'
 ];
 
-const historialMedicoFields = [
-    'id_historial',
-    'id_perro',
-    'tipo_registro',
-    'descripcion',
-    db.raw("DATE_FORMAT(fecha_registro, '%Y-%m-%d') as fecha_registro"),
-    'observaciones'
-];
-
 const publicacionFields = [
     'id_publicacion',
     'id_usuario',
@@ -187,6 +178,7 @@ const resolvers = {
     },
 
     Mutation: {
+        logout,
         login: async (_, { correo, contrasena }, context) => {
             await limitAuth(context.ip);
             ({ correo } = validate({ correo }));
@@ -195,7 +187,7 @@ const resolvers = {
             const validHash = isHash(usuario?.contrasena);
             const matches = await bcrypt.compare(contrasena, validHash ? usuario.contrasena : await dummyHash);
             if (!matches || !validHash || !active(usuario)) fail('Correo o contraseña incorrectos.', 'UNAUTHENTICATED');
-            return { token: generateToken(usuario), usuario };
+            return { token: await generateToken(usuario), usuario };
         },
 
         addUsuario: async (_, { nombre, apellido, correo, contrasena, telefono, estado }) => {
@@ -278,8 +270,16 @@ const resolvers = {
             }, perroFields);
         },
 
-        deletePerro: async (_, { id_perro }) => {
-            return await deleteById('perros', 'id_perro', id_perro, `Perro con id ${id_perro} eliminado`);
+        deletePerro: async (_, { id_perro }, context) => {
+            return db.transaction(async trx => {
+                await require('../../services/history').allowedDogs(context, id_perro, trx, true);
+                if (await require('../../models/HistorialMedico').Historial.exists({ id_perro })) {
+                    fail('La mascota tiene historial médico. Elimina primero sus registros.', 'CONFLICT');
+                }
+                const deleted = await trx('perros').where({ id_perro }).del();
+                if (!deleted) fail('Registro no disponible.', 'NOT_FOUND');
+                return `Perro con id ${id_perro} eliminado`;
+            });
         },
 
         addUbicacion: async (_, { id_perro, latitud, longitud, estado }) => {
@@ -450,28 +450,6 @@ const resolvers = {
             return await deleteById('citas_veterinarias', 'id_cita', id_cita, `Cita veterinaria con id ${id_cita} eliminada`);
         },
 
-        addHistorialMedico: async (_, { id_perro, tipo_registro, descripcion, observaciones }) => {
-            return await insertAndReturn('historial_medico', 'id_historial', {
-                id_perro,
-                tipo_registro,
-                descripcion,
-                observaciones
-            }, historialMedicoFields);
-        },
-
-        updateHistorialMedico: async (_, { id_historial, id_perro, tipo_registro, descripcion, observaciones }) => {
-            return await updateAndReturn('historial_medico', 'id_historial', id_historial, {
-                id_perro,
-                tipo_registro,
-                descripcion,
-                observaciones
-            }, historialMedicoFields);
-        },
-
-        deleteHistorialMedico: async (_, { id_historial }) => {
-            return await deleteById('historial_medico', 'id_historial', id_historial, `Historial medico con id ${id_historial} eliminado`);
-        },
-
         addPublicacion: async (_, { id_usuario, titulo, contenido, estado }) => {
             return await insertAndReturn('publicaciones', 'id_publicacion', {
                 id_usuario,
@@ -496,7 +474,7 @@ const resolvers = {
     }
 };
 
-module.exports = protect(resolvers, [
+const secured = protect(resolvers, [
     { entity: 'Usuario', list: 'usuarios', one: 'usuario', table: 'usuarios', id: 'id_usuario', fields: usuarioFields, public: false, required: ["nombre", "apellido", "correo", "contrasena"] },
     { entity: 'Raza', list: 'razas', one: 'raza', table: 'razas', id: 'id_raza', fields: razaFields, public: true, required: ["nombre_raza", "tamano"] },
     { entity: 'Perro', list: 'perros', one: 'perro', table: 'perros', id: 'id_perro', fields: perroFields, public: false, required: ["id_usuario", "id_raza", "nombre", "sexo"] },
@@ -507,6 +485,10 @@ module.exports = protect(resolvers, [
     { entity: 'Vacuna', list: 'vacunas', one: 'vacuna', table: 'vacunas', id: 'id_vacuna', fields: vacunaFields, public: true, required: ["nombre_vacuna"] },
     { entity: 'CartillaDetalle', list: 'cartillaDetalles', one: 'cartillaDetalle', table: 'cartilla_detalle', id: 'id_detalle_cartilla', fields: cartillaDetalleFields, public: false, required: ["id_cartilla", "id_vacuna"] },
     { entity: 'CitaVeterinaria', list: 'citasVeterinarias', one: 'citaVeterinaria', table: 'citas_veterinarias', id: 'id_cita', fields: citaVeterinariaFields, public: false, required: ["id_perro", "fecha_cita", "veterinaria", "motivo"] },
-    { entity: 'HistorialMedico', list: 'historialesMedicos', one: 'historialMedico', table: 'historial_medico', id: 'id_historial', fields: historialMedicoFields, public: false, required: ["id_perro", "tipo_registro", "descripcion"] },
     { entity: 'Publicacion', list: 'publicaciones', one: 'publicacion', table: 'publicaciones', id: 'id_publicacion', fields: publicacionFields, public: false, required: ["id_usuario", "titulo", "contenido"] }
 ]);
+// El historial usa MongoDB y verifica la propiedad de las mascotas en MySQL.
+const history = require('../../services/history');
+Object.assign(secured.Query, history.Query);
+Object.assign(secured.Mutation, history.Mutation);
+module.exports = secured;

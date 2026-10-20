@@ -54,3 +54,6 @@ htmlcov/
 ._*
 Thumbs.db
 Desktop.ini
+
+# Credenciales de la demostración local
+.demo-credentials*

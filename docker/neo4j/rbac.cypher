@@ -1,0 +1,25 @@
+// Modelo conceptual demostrable. Usuarios demo independientes de las cuentas SQL.
+CREATE CONSTRAINT usuario_id IF NOT EXISTS FOR (u:Usuario) REQUIRE u.id IS UNIQUE;
+CREATE CONSTRAINT rol_nombre IF NOT EXISTS FOR (r:Rol) REQUIRE r.nombre IS UNIQUE;
+CREATE CONSTRAINT permiso_nombre IF NOT EXISTS FOR (p:Permiso) REQUIRE p.nombre IS UNIQUE;
+CREATE CONSTRAINT recurso_id IF NOT EXISTS FOR (r:Recurso) REQUIRE r.id IS UNIQUE;
+MERGE (:Rol {nombre: 'dueno'});
+MERGE (:Rol {nombre: 'administrador'});
+MERGE (:Permiso {nombre: 'leer_historial'});
+MERGE (:Permiso {nombre: 'editar_historial'});
+MERGE (:Permiso {nombre: 'gestionar_catalogos'});
+MERGE (:Recurso {id: 'historiales', nombre: 'Historial médico'});
+MERGE (:Recurso {id: 'catalogos', nombre: 'Razas y vacunas'});
+MATCH (r:Rol {nombre:'dueno'}), (p:Permiso) WHERE p.nombre IN ['leer_historial','editar_historial'] MERGE (r)-[:TIENE_PERMISO]->(p);
+MATCH (r:Rol {nombre:'administrador'}), (d:Rol {nombre:'dueno'}) MERGE (r)-[:HEREDA_DE]->(d);
+MATCH (r:Rol {nombre:'administrador'}), (p:Permiso {nombre:'gestionar_catalogos'}) MERGE (r)-[:TIENE_PERMISO]->(p);
+MATCH (p:Permiso), (r:Recurso {id:'historiales'}) WHERE p.nombre IN ['leer_historial','editar_historial'] MERGE (p)-[:SOBRE]->(r);
+MATCH (p:Permiso {nombre:'gestionar_catalogos'}), (r:Recurso {id:'catalogos'}) MERGE (p)-[:SOBRE]->(r);
+MERGE (:Usuario {id:'demo-ana', nombre:'Ana'});
+MERGE (:Usuario {id:'demo-admin', nombre:'Administrador'});
+MATCH (u:Usuario {id:'demo-ana'}), (r:Rol {nombre:'dueno'}) MERGE (u)-[:TIENE_ROL]->(r);
+MATCH (u:Usuario {id:'demo-admin'}), (r:Rol {nombre:'administrador'}) MERGE (u)-[:TIENE_ROL]->(r);
+MERGE (:Recurso {id:'mascota-luna', nombre:'Luna', tipo:'mascota'});
+MERGE (:Recurso {id:'mascota-max', nombre:'Max', tipo:'mascota'});
+MATCH (u:Usuario {id:'demo-ana'}), (m:Recurso) WHERE m.tipo='mascota' MERGE (u)-[:ES_DUENO_DE]->(m);
+MATCH (m:Recurso), (h:Recurso {id:'historiales'}) WHERE m.tipo='mascota' MERGE (h)-[:APLICA_A]->(m);

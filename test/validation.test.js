@@ -26,3 +26,22 @@ test('limita consultas con fragmentos repetidos antes de resolver', async () => 
     const hooks = await operationLimit.requestDidStart();
     await assert.rejects(hooks.didResolveOperation({ document, operation: document.definitions[0] }));
 });
+
+test('rechaza autenticación con 503 si Redis no puede verificar la sesión', async () => {
+    const jwt = require('jsonwebtoken');
+    const { randomUUID } = require('node:crypto');
+    const { redisClient } = require('../src/database/redis');
+    const { contextForRequest } = require('../src/security/auth');
+    const before = redisClient.get;
+    const secretBefore = process.env.JWT_SECRET;
+    process.env.JWT_SECRET = 'test-only-secret-with-at-least-32-bytes';
+    const token = jwt.sign({ id_usuario: 1 }, process.env.JWT_SECRET, { algorithm: 'HS256', jwtid: randomUUID(), issuer: 'pawly-api', audience: 'pawly', expiresIn: 60 });
+    redisClient.get = async () => { throw new Error('offline'); };
+    try {
+        await assert.rejects(contextForRequest({ headers: { authorization: `Bearer ${token}` } }), error => error.extensions.code === 'SERVICE_UNAVAILABLE' && error.extensions.http.status === 503);
+    } finally {
+        redisClient.get = before;
+        if (secretBefore === undefined) delete process.env.JWT_SECRET;
+        else process.env.JWT_SECRET = secretBefore;
+    }
+});

@@ -14,11 +14,22 @@ services:
       DB_PASSWORD: ${DB_PASSWORD:?Copia .env.example a .env y configura DB_PASSWORD}
       DB_DATABASE: pawly
       DB_SSL: "false"
+      MONGO_URI: mongodb://bda-mongodb:27017/pawly
+      MONGO_USER: pawly
+      MONGO_PASSWORD: ${MONGO_PASSWORD:?Configura MONGO_PASSWORD en .env}
+      REDIS_URL: redis://bda-redis-stack:6379
+      REDIS_PASSWORD: ${REDIS_PASSWORD:?Configura REDIS_PASSWORD en .env}
+      HISTORY_CACHE_TTL: ${HISTORY_CACHE_TTL:-60}
+      SESSION_TTL: ${SESSION_TTL:-3600}
       ADMIN_USER_IDS: ${ADMIN_USER_IDS:-}
       CORS_ORIGINS: ${CORS_ORIGINS:-http://localhost:3000,http://localhost:5173}
       GRAPHQL_INTROSPECTION: ${GRAPHQL_INTROSPECTION:-false}
       JWT_SECRET: ${JWT_SECRET:?Configura JWT_SECRET en .env}
     depends_on:
+      bda-mongodb:
+        condition: service_healthy
+      bda-redis-stack:
+        condition: service_healthy
       db:
         condition: service_healthy
     healthcheck:
@@ -44,5 +55,66 @@ services:
       timeout: 5s
       retries: 30
       start_period: 30s
+  bda-mongodb:
+    image: mongo:8.0
+    restart: unless-stopped
+    environment:
+      MONGO_INITDB_ROOT_USERNAME: admin
+      MONGO_INITDB_ROOT_PASSWORD: ${MONGO_ROOT_PASSWORD:?Configura MONGO_ROOT_PASSWORD}
+      MONGO_PASSWORD: ${MONGO_PASSWORD:?Configura MONGO_PASSWORD}
+    ports:
+      - "127.0.0.1:${MONGO_PORT:-27017}:27017"
+    volumes:
+      - mongo_data:/data/db
+      - ./docker/mongodb:/docker-entrypoint-initdb.d:ro
+    healthcheck:
+      test: ["CMD", "mongosh", "--quiet", "--eval", "db.getSiblingDB('pawly').auth('pawly', process.env.MONGO_PASSWORD); if (!db.getSiblingDB('pawly').runCommand({connectionStatus:1}).authInfo.authenticatedUsers.length) quit(1)"]
+      interval: 10s
+      timeout: 10s
+      retries: 20
+      start_period: 30s
+  bda-redis-stack:
+    image: redis/redis-stack:7.4.0-v8
+    restart: unless-stopped
+    environment:
+      REDIS_ARGS: --requirepass ${REDIS_PASSWORD:?Configura REDIS_PASSWORD} --appendonly yes --appendfsync always
+      REDIS_PASSWORD: ${REDIS_PASSWORD:?Configura REDIS_PASSWORD}
+    ports:
+      - "127.0.0.1:${REDIS_PORT:-6379}:6379"
+      - "127.0.0.1:${REDISINSIGHT_PORT:-8001}:8001"
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD-SHELL", "REDISCLI_AUTH=\"$$REDIS_PASSWORD\" redis-cli ping | grep -q PONG"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+  bda-neo4j:
+    image: neo4j:5.26-community
+    restart: unless-stopped
+    environment:
+      NEO4J_AUTH: neo4j/${NEO4J_PASSWORD:?Configura NEO4J_PASSWORD}
+      PAWLY_NEO4J_PASSWORD: ${NEO4J_PASSWORD:?Configura NEO4J_PASSWORD}
+      NEO4J_server_memory_heap_initial__size: 256m
+      NEO4J_server_memory_heap_max__size: 512m
+      NEO4J_server_memory_pagecache_size: 256m
+    ports:
+      - "127.0.0.1:${NEO4J_HTTP_PORT:-7474}:7474"
+      - "127.0.0.1:${NEO4J_BOLT_PORT:-7687}:7687"
+    volumes:
+      - neo4j_data:/data
+      - ./docker/neo4j:/scripts:ro
+    healthcheck:
+      test: ["CMD-SHELL", "cypher-shell -u neo4j -p \"$$PAWLY_NEO4J_PASSWORD\" \"RETURN 1\" >/dev/null 2>&1"]
+      interval: 15s
+      timeout: 10s
+      retries: 20
+      start_period: 40s
+networks:
+  default:
+    name: pawly_privada
 volumes:
+  mongo_data:
+  redis_data:
+  neo4j_data:
   mysql_data:

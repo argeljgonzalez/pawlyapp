@@ -1,204 +1,138 @@
 # PawlyApp API
 
-Backend actual de Pawly, desarrollado con Node.js, GraphQL, Apollo Server 5,
-MySQL, Knex y JWT para el proyecto de Bases de Datos II. Gestiona usuarios,
-perros, razas, ubicaciones, recordatorios, vacunas, citas, historiales y publicaciones.
-La migración prevista a Django aún no está implementada en este repositorio.
+Backend de Pawly con Node.js, Apollo Server 5 y GraphQL. **Un usuario puede registrar
+varias mascotas**, cada una con su historial médico. MySQL conserva usuarios,
+mascotas y catálogos; MongoDB almacena los historiales; Redis Stack gestiona caché
+y sesiones. Neo4j contiene el modelo RBAC conceptual del Segundo Parcial.
 
-## Ejecutar con Docker
+La documentación del examen, diagramas, puertos, Cypher, SDL, agregación y guía de
+defensa están en **[docs/SEGUNDO_PARCIAL.md](docs/SEGUNDO_PARCIAL.md)**.
 
-Requisito: Docker Desktop en ejecución (o Docker Engine con el plugin Compose).
-No necesitas instalar Node.js ni MySQL en tu computadora.
+## Inicio con Docker
+
+Requisito: Docker Desktop o Docker Engine con Compose en ejecución.
 
 ```bash
 git clone https://github.com/argeljgonzalez/pawlyapp.git
 cd pawlyapp
+# Selecciona la rama del parcial cuando esté publicada.
+git switch feature/parcial2-nosql-sesiones
 cp .env.example .env
+# Cambia las contraseñas y JWT_SECRET por valores propios.
 docker compose up -d --build --wait
 ```
 
-En PowerShell utiliza `Copy-Item .env.example .env` en lugar de `cp`.
-Antes de iniciar, cambia las contraseñas y `JWT_SECRET` en `.env` por valores
-propios. No subas ese archivo: está excluido de Git y del contexto de construcción.
-Las plantillas de ejemplo sí se versionan.
-
-API local: http://localhost:4000/
+En PowerShell usa `Copy-Item .env.example .env`.
+API: http://localhost:4000/. La introspección está desactivada por defecto;
+consulta la guía del parcial para habilitar Apollo Sandbox local.
 
 ```bash
-curl http://localhost:4000/ -H 'Content-Type: application/json' --data '{"query":"{ razas { id_raza nombre_raza } }"}'
+curl http://localhost:4000/ -H 'Content-Type: application/json' --data '{"query":"{ razas(limit: 5) { id_raza nombre_raza } }"}'
 ```
 
-Inicialmente devuelve una lista vacía. No se crean cuentas ni datos de ejemplo.
-La API está publicada solo en la interfaz local de la computadora. MySQL es
-accesible desde la red interna de Compose, sin publicar el puerto 3306.
-Desde el emulador Android estándar, el host se alcanza mediante `10.0.2.2`;
-la app actual requiere adaptar sus servicios REST para consumir esta API GraphQL.
+Los servicios están en la red `pawly_privada`. Los puertos publicados se enlazan
+solo a localhost. Si ya tienes contenedores de clase ocupando puertos, cambia
+`MONGO_PORT`, `REDIS_PORT`, `REDISINSIGHT_PORT`, `NEO4J_HTTP_PORT` y
+`NEO4J_BOLT_PORT` en `.env`. Mantén los puertos internos del Compose.
 
-### Servicios y configuración
+## Preparar la demostración
 
-- `api`: Node.js 22, construido con las versiones de `package-lock.json`.
-- `db`: MySQL 8.4 con volumen persistente `mysql_data`.
-- `docker/mysql/init/001-schema.sql`: crea las 12 tablas al inicializar una base vacía.
+Consulta [docs/DEMOSTRACION.md](docs/DEMOSTRACION.md) para el recorrido y los datos esperados.
 
-El esquema se dedujo del código GraphQL; no representa un respaldo de la base
-remota. Incluye relaciones con claves foráneas, correo único y fechas por defecto.
-Las dependencias deben borrarse antes que sus registros padres.
+```bash
+# Crea el grafo de ejemplo sin duplicarlo si se repite.
+docker compose exec -T bda-neo4j sh -c 'cypher-shell -u neo4j -p "$PAWLY_NEO4J_PASSWORD" -f /scripts/rbac.cypher'
 
-| Variable en `.env` | Uso |
+# Crea una cuenta con Luna y Max; muestra una contraseña aleatoria una sola vez.
+docker compose exec api npm run seed:demo
+```
+
+No hay contraseñas ni administradores predeterminados. Guarda la salida del seed
+localmente, nunca en Git. La repetición no reinicia ni duplica una cuenta demo.
+
+## Configuración principal
+
+| Variable | Uso |
 | --- | --- |
-| `API_PORT` | Puerto local de la API; predeterminado 4000 |
-| `DB_PASSWORD` | Contraseña del usuario MySQL `pawly` |
-| `MYSQL_ROOT_PASSWORD` | Contraseña administrativa de MySQL |
-| `JWT_SECRET` | Clave aleatoria de al menos 32 bytes para firmar tokens |
-| `ADMIN_USER_IDS` | IDs de usuarios administradores, separados por coma; vacío por defecto |
+| `API_PORT` | Puerto local de la API (4000) |
+| `DB_PASSWORD`, `MYSQL_ROOT_PASSWORD` | Acceso MySQL local |
+| `MONGO_PASSWORD`, `MONGO_ROOT_PASSWORD` | Usuario de aplicación y administrador MongoDB |
+| `REDIS_PASSWORD` | Contraseña Redis; usa una clave alfanumérica larga sin espacios |
+| `NEO4J_PASSWORD` | Contraseña de `neo4j` |
+| `JWT_SECRET` | Secreto aleatorio de al menos 32 bytes |
+| `ADMIN_USER_IDS` | IDs administradores, separados por coma; vacío por defecto |
+| `SESSION_TTL` | Vigencia de sesión y JWT en segundos (3600) |
+| `HISTORY_CACHE_TTL` | TTL de caché del historial (60) |
 | `CORS_ORIGINS` | Orígenes web permitidos, separados por coma |
-| `GRAPHQL_INTROSPECTION` | `true` solo cuando necesites explorar el esquema en desarrollo |
+| `GRAPHQL_INTROSPECTION` | `true` para la demostración local de Sandbox |
 
-Compose fija el host `db`, puerto `3306`, usuario y base `pawly` para la conexión
-interna. Establece `DB_SSL=false` para MySQL local. Fuera de Compose, TLS está habilitado por defecto y verifica el certificado.
-Para una autoridad privada configura `DB_SSL_CA` con su certificado PEM; no se
-desactiva la verificación del certificado.
+Los TTL aceptan de 1 a 86400 segundos. Las contraseñas de bases ya inicializadas
+no cambian por modificar `.env`; deben cambiarse también dentro del motor.
+Las credenciales no forman parte de Git ni de la imagen Docker.
 
-La API espera a que MySQL tenga las tablas disponibles. Su comprobación de salud
-consulta GraphQL y MySQL sin modificar datos, siguiendo el mecanismo de
-[dependencias saludables de Compose](https://docs.docker.com/compose/how-tos/startup-order/).
+## Autenticación y acceso
 
-### Comandos habituales
+`addUsuario` y `login` son públicos. Las contraseñas se guardan con bcrypt, mínimo
+8 caracteres y máximo 72 bytes. No existe un campo de contraseña consultable.
+Cada petición privada usa `Authorization: Bearer <token>` y comprueba la sesión
+en Redis, la cuenta activa y la vigencia de la contraseña. `logout` revoca la
+sesión actual inmediatamente. Los tokens anteriores a Redis requieren un nuevo login.
+Quita un token revocado del header antes de volver a iniciar sesión.
+
+Un usuario administra sus mascotas y sus registros. La lectura de razas, vacunas
+y tipos de recordatorio es pública; su escritura exige administrador. Para dar
+ese permiso, registra una cuenta, agrega su ID a `ADMIN_USER_IDS` y ejecuta
+`docker compose up -d --wait`. No puede asignarse desde el registro público.
+
+Las listas aceptan `limit` (1 a 100, predeterminado 50) y `offset` (desde 0).
+El historial admite `id_perro` para consultar y cachear una mascota. El reporte
+`resumenHistorialMedico` agrupa por tipo de registro, para una o todas las mascotas.
+
+## Pruebas y mantenimiento
 
 ```bash
-# Estado y registros
+docker compose exec api npm test
+docker compose exec api npm run test:integration
+docker compose exec api npm audit --omit=dev
+docker compose logs --tail=100 api
 docker compose ps
-docker compose logs --tail=100 api db
+```
 
-# Detener conservando los datos
+Las pruebas de integración usan datos temporales y un servidor aislado interno.
+Ejecuta solo contra el entorno de desarrollo. Consulta `docs/evidencia-parcial2.json`
+para las mediciones registradas de esta entrega.
+
+```bash
+# Detener conservando los datos.
 docker compose down
-
-# Volver a iniciar, o reconstruir después de cambiar el código
-docker compose up -d --build --wait
-
-# Consola MySQL (solicita DB_PASSWORD)
-docker compose exec db mysql -u pawly -p pawly
-```
-
-Los cambios al SQL de inicio solo se aplican cuando el volumen está vacío.
-Cambiar las contraseñas de `.env` tampoco cambia las de una base ya inicializada.
-Para conservar datos existentes, aplica los cambios de esquema o contraseñas
-explícitamente en MySQL.
-
-**Reinicio destructivo de la base local:** solo si quieres borrar todos sus datos:
-
-```bash
-docker compose down -v
+# Aplicar cambios de código y volver a iniciar.
 docker compose up -d --build --wait
 ```
 
-Si el puerto 4000 está ocupado, cambia `API_PORT` (por ejemplo a 4001) y vuelve a
-iniciar. La primera ejecución descarga imágenes y dependencias y puede tardar.
+`docker compose down -v` **borra todos los volúmenes del proyecto**; no lo uses si
+quieres conservar los datos. Los scripts de inicialización SQL/Mongo se ejecutan
+solo sobre volúmenes nuevos.
 
-### Comprobar la instalación
+Para una base anterior, respalda primero y sigue las instrucciones de
+`npm run migrate:passwords` (contraseñas SQL en texto plano) y
+`npm run migrate:history` (historial SQL a MongoDB) en la guía del parcial.
+La importación no borra el origen ni se ejecuta automáticamente.
 
-```bash
-docker compose exec api node docker/smoke-test.js
-```
+## Ejecución sin Docker
 
-La prueba crea registros temporales para los 12 módulos, verifica login, JWT,
-lecturas y actualización, y elimina sus propios registros al terminar.
-
-## Ejecutar sin Docker
-
-Necesitas Node.js y una base MySQL con las tablas del script SQL. Configura en
-`.env`: `DB_HOST`, `DB_PORT`, `DB_USER`, `DB_PASSWORD`, `DB_DATABASE`,
-`JWT_SECRET` y opcionalmente `PORT` (4000 por defecto). Para MySQL local sin TLS,
-agrega `DB_SSL=false`.
+Necesitas Node.js 22+, MySQL, MongoDB y Redis. Configura `DB_HOST`, `DB_PORT`,
+`DB_USER`, `DB_PASSWORD`, `DB_DATABASE`, `MONGO_URI`, `MONGO_USER`, `MONGO_PASSWORD`,
+`REDIS_URL`, `REDIS_PASSWORD`, `JWT_SECRET` y opcionalmente `PORT`.
+Para MongoDB se usa la base/autenticación `pawly`. MySQL remoto verifica TLS;
+usa `DB_SSL_CA` si necesitas una CA privada. `DB_SSL=false` es para MySQL local.
 
 ```bash
 npm ci
 npm start
 ```
 
-`npm run dev` también inicia el servidor, sin recarga automática.
-
-## Autenticación y permisos
-
-El registro (`addUsuario`) y el inicio de sesión (`login`) son públicos.
-Las contraseñas nuevas requieren al menos 8 caracteres y como máximo 72 bytes
-UTF-8; se almacenan con bcrypt (coste 12) y nunca se exponen en GraphQL.
-
-```graphql
-mutation {
-  addUsuario(nombre: "Ana", apellido: "Pérez", correo: "ana@example.com",
-             contrasena: "usa-una-clave-propia") {
-    id_usuario nombre correo
-  }
-}
-```
-
-`login(correo: ..., contrasena: ...)` devuelve el token. Para las operaciones
-privadas envía `Authorization: Bearer <token>`. El JWT dura una hora y se invalida
-si cambia la contraseña, se elimina la cuenta o su estado deja de ser `activo`.
-No existe un endpoint de renovación automática.
-
-- Usuarios normales consultan y modifican únicamente su cuenta y sus perros,
-  ubicaciones, cartillas, recordatorios, citas, historiales y publicaciones.
-- Razas, vacunas y tipos de recordatorio tienen lectura pública.
-- Solo administradores pueden modificar esos catálogos, gestionar otras cuentas
-  y cambiar el estado de usuarios (`activo` / `inactivo`).
-- Cada lista acepta `limit` (50 por defecto, máximo 100) y `offset` (0 por defecto).
-- Los errores no devuelven SQL, contraseñas ni trazas internas. Los conflictos de
-  datos duplicados o relaciones se identifican con el código `CONFLICT`.
-
-### Configurar un administrador
-
-Registra primero una cuenta y copia su `id_usuario` devuelto por la API. Añade
-ese ID a `ADMIN_USER_IDS` en tu `.env` y ejecuta:
-
-```bash
-docker compose up -d --wait
-```
-
-No hay administrador ni credenciales predeterminadas. Los permisos solo se
-asignan desde la configuración del servidor, nunca desde el registro público.
-
-### Contraseñas de una base anterior
-
-El backend ya no acepta contraseñas guardadas en texto plano. Si conectas una
-base anterior, respáldala y ejecuta explícitamente esta conversión una sola vez:
-
-```bash
-docker compose exec api npm run migrate:passwords
-```
-
-La conversión es transaccional, no muestra contraseñas y omite las que ya tienen
-hash bcrypt. Las contraseñas vacías o de más de 72 bytes requieren restablecimiento
-antes de migrar. No se ejecuta automáticamente contra una base remota. Los tokens
-emitidos por la versión anterior requieren iniciar sesión nuevamente.
-
-## Comprobaciones de seguridad
-
-```bash
-docker compose exec api npm test
-docker compose exec api npm run test:integration
-docker compose exec api npm audit --omit=dev
-```
-
-La prueba de integración inicia un servidor aislado en el puerto interno 4001 y
-usa cuentas temporales para comprobar los 12 módulos, permisos entre usuarios,
-hashes, tokens inválidos, cambio de contraseña, validaciones y límites. Limpia
-sus registros al terminar; ejecútala en desarrollo, no contra datos de producción.
-
-Se limitan las solicitudes HTTP (120/minuto/IP), las operaciones de login y registro
-(20/15 minutos/IP), el tamaño del cuerpo (32 KB) y las selecciones GraphQL.
-Los límites se mantienen en memoria por instancia y se reinician con el proceso.
-No se confía automáticamente en `X-Forwarded-For`; si incorporas un proxy o varias
-instancias, configura la confianza y un almacenamiento compartido de límites de
-acuerdo con esa infraestructura. CORS permite por defecto React local en los
-puertos 3000 y 5173. La introspección está desactivada salvo configuración explícita.
-
-## Alcance de este entorno
-
-Este Compose es para desarrollo local y conserva Node.js/GraphQL y los módulos
-existentes. No incluye todavía Django, React ni otros motores de datos. Para una
-publicación en Internet también hace falta configurar HTTPS, secretos del entorno,
-respaldos y el proxy correspondiente.
-
-Endpoint remoto documentado previamente: https://pawlyapp.onrender.com/
+Se conservan los controles de seguridad, límites HTTP y errores sin trazas.
+Los límites de solicitudes son por instancia y no confían automáticamente en
+`X-Forwarded-For`. Este entorno es local: una publicación requiere HTTPS,
+respaldos, secretos propios y configuración del proxy. La migración futura a
+Django y los clientes React/Android no forman parte de este parcial.

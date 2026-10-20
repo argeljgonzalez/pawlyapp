@@ -111,6 +111,11 @@ const typeDefs = `
         observaciones: String
     }
 
+    type ResumenHistorial {
+        tipo_registro: String!
+        cantidad: Int!
+    }
+
     type Publicacion {
         id_publicacion: Int!
         id_usuario: Int
@@ -152,14 +157,16 @@ const typeDefs = `
         citasVeterinarias(limit: Int = 50, offset: Int = 0): [CitaVeterinaria]
         citaVeterinaria(id_cita: Int!): CitaVeterinaria
 
-        historialesMedicos(limit: Int = 50, offset: Int = 0): [HistorialMedico]
+        historialesMedicos(id_perro: Int, limit: Int = 50, offset: Int = 0): [HistorialMedico]
         historialMedico(id_historial: Int!): HistorialMedico
+        resumenHistorialMedico(id_perro: Int): [ResumenHistorial!]!
 
         publicaciones(limit: Int = 50, offset: Int = 0): [Publicacion]
         publicacion(id_publicacion: Int!): Publicacion
     }
 
     type Mutation {
+        logout: Boolean!
         login(
             correo: String!,
             contrasena: String!
