@@ -57,3 +57,6 @@ Desktop.ini
 
 # Credenciales de la demostración local
 .demo-credentials*
+
+# Respaldos privados de migración
+.migration-private/

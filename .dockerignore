@@ -12,3 +12,4 @@ __pycache__
 
 # Credenciales de la demostración local
 .demo-credentials*
+.migration-private

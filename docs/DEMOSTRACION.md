@@ -13,7 +13,7 @@ Una cuenta, **Ana Demo**, con correo `demo.parcial2@pawly.example`, es dueña de
 | Max | 1 | 1 | 2 |
 | Ambas | 3 | 2 | 5 |
 
-MySQL guarda la cuenta y las mascotas. MongoDB guarda estos cinco eventos médicos.
+MongoDB guarda la cuenta, las mascotas y estos cinco eventos médicos.
 Redis guarda temporalmente las consultas y las sesiones. Neo4j muestra un grafo
 conceptual con Ana, sus dos mascotas y los permisos de dueño; incluye además un
 administrador ficticio para explicar la herencia. Los usuarios del grafo no son

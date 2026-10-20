@@ -1,20 +1,20 @@
-const db = require('../database/db');
+const db = require('../database/repository');
 const { fail } = require('./errors');
 const { validate } = require('./validation');
 const { RateLimiterMemory } = require('rate-limiter-flexible');
 const authLimiter = new RateLimiterMemory({ points: 20, duration: 900 });
 
-// Limita en SQL: los listados nunca cargan datos privados de otro dueño.
-function scope(query, resource, user) {
-    if (resource.public || user.isAdmin) return query;
-    const owner = user.id_usuario;
-    if (resource.table === 'usuarios') return query.where('id_usuario', owner);
-    if (['perros', 'publicaciones'].includes(resource.table)) return query.where('id_usuario', owner);
-    const dogs = db('perros').select('id_perro').where('id_usuario', owner);
-    if (resource.table === 'cartilla_detalle') {
-        return query.whereIn('id_cartilla', db('cartillas_vacunacion').select('id_cartilla').whereIn('id_perro', dogs));
+// Filtra en MongoDB antes de devolver cualquier documento privado.
+async function scope(resource, user) {
+    if (resource.public || user.isAdmin) return {};
+    const owner=user.id_usuario;
+    if (['usuarios','perros','publicaciones'].includes(resource.table)) return {id_usuario:owner};
+    const dogs=(await db.find('perros',{id_usuario:owner},{fields:['id_perro']})).map(row=>row.id_perro);
+    if (resource.table==='cartilla_detalle') {
+        const cards=await db.find('cartillas_vacunacion',{id_perro:{$in:dogs}},{fields:['id_cartilla']});
+        return {id_cartilla:{$in:cards.map(row=>row.id_cartilla)}};
     }
-    return query.whereIn('id_perro', dogs);
+    return {id_perro:{$in:dogs}};
 }
 function protect(resolvers, resources) {
     for (const r of resources) {
@@ -22,17 +22,17 @@ function protect(resolvers, resources) {
             resolvers.Query[name] = async (_, args, context) => {
                 if (!r.public && !context.user) fail('Debes iniciar sesión.', 'UNAUTHENTICATED');
                 validate(args);
-                const query = scope(db(r.table).select(r.fields), r, context.user);
-                if (!list) return query.where(r.id, args[r.id]).first();
+                const filter = await scope(r, context.user);
+                if (!list) return db.one(r.table, {$and:[filter,{[r.id]:args[r.id]}]}, r.fields);
                 const { limit = 50, offset = 0 } = args;
                 if (!Number.isInteger(limit) || limit < 1 || limit > 100 || !Number.isInteger(offset) || offset < 0) fail('Usa limit entre 1 y 100 y offset mayor o igual a 0.');
-                return query.orderBy(r.id).limit(limit).offset(offset);
+                return db.find(r.table,filter,{fields:r.fields,limit,offset});
             };
         }
         for (const action of ['add', 'update', 'delete']) {
             const name = action + r.entity;
             const original = resolvers.Mutation[name];
-            resolvers.Mutation[name] = async (parent, args, context, info) => {
+            resolvers.Mutation[name] = async (parent, args, context, info) => db.transaction(async () => {
                 const registering = name === 'addUsuario';
                 if (!registering && !context.user) fail('Debes iniciar sesión.', 'UNAUTHENTICATED');
                 if (r.public && !context.user?.isAdmin) fail('Solo un administrador puede editar catálogos.', 'FORBIDDEN');
@@ -43,7 +43,7 @@ function protect(resolvers, resources) {
                     args.estado = 'activo';
                 } else {
                     if (action !== 'add') {
-                        const existing = await scope(db(r.table), r, context.user).where(r.id, args[r.id]).first();
+                        const existing = await db.one(r.table, {$and:[await scope(r,context.user),{[r.id]:args[r.id]}]});
                         if (!existing) fail('Registro no disponible.', 'NOT_FOUND');
                     }
                     if (r.table === 'usuarios' && 'estado' in args && !context.user.isAdmin) fail('Solo un administrador puede cambiar el estado de la cuenta.', 'FORBIDDEN');
@@ -51,19 +51,13 @@ function protect(resolvers, resources) {
                     for (const [key, table] of [['id_perro', 'perros'], ['id_cartilla', 'cartillas_vacunacion']]) {
                         if (args[key] != null && key !== r.id) {
                             const target = resources.find(item => item.table === table);
-                            if (!await scope(db(table), target, context.user).where(key, args[key]).first()) fail('Registro relacionado no disponible.', 'FORBIDDEN');
+                            if (!await db.one(table, {$and:[await scope(target,context.user),{[key]:args[key]}]})) fail('Registro relacionado no disponible.', 'FORBIDDEN');
                         }
                     }
                 }
                 if (r.table === 'usuarios' && args.estado != null && !['activo', 'inactivo'].includes(args.estado)) fail('Estado de usuario inválido.');
-                try { return await original(parent, args, context, info); }
-                catch (error) {
-                    if (error.code === 'ER_DUP_ENTRY') fail('Ya existe un registro con esos datos.', 'CONFLICT');
-                    if (['ER_ROW_IS_REFERENCED_2', 'ER_NO_REFERENCED_ROW_2'].includes(error.code)) fail('La operación entra en conflicto con registros relacionados.', 'CONFLICT');
-                    if (['ER_DATA_TOO_LONG', 'ER_BAD_NULL_ERROR', 'ER_TRUNCATED_WRONG_VALUE_FOR_FIELD'].includes(error.code)) fail('Los datos no cumplen el formato requerido.');
-                    throw error;
-                }
-            };
+                return original(parent,args,context,info);
+            });
         }
     }
     return resolvers;

@@ -3,8 +3,8 @@
 Pawly permite que **un usuario registre varias mascotas** y administre el cuidado
 individual de cada una. Este entregable incorpora MongoDB para el historial
 médico, Redis Stack para caché y sesiones, y un modelo RBAC demostrable en Neo4j.
-La API existente continúa en Node.js y Apollo Server con GraphQL. MySQL conserva
-usuarios, mascotas y los otros módulos del proyecto.
+La API continúa en Node.js y Apollo Server con GraphQL. MongoDB conserva
+usuarios, mascotas y todos los demás módulos del proyecto.
 
 El alcance sigue el documento **Examen Segundo Bases de datos avanzadas** del
 Parcial 2. La demostración se concentra en las mascotas Luna y Max de una misma
@@ -34,11 +34,9 @@ flowchart LR
     Insight[RedisInsight 8001] --> REDIS
     subgraph Red[Red bridge privada pawly_privada]
         API[api — Apollo GraphQL]
-        MYSQL[db — MySQL]
         MONGO[bda-mongodb — MongoDB]
         REDIS[bda-redis-stack — Redis Stack]
         NEO[bda-neo4j — Neo4j]
-        API -->|3306| MYSQL
         API -->|27017 Mongoose| MONGO
         API -->|6379 sesiones y caché| REDIS
     end
@@ -54,7 +52,6 @@ vinculan a `127.0.0.1`, no a todas las interfaces. La red no se declara
 | Servicio | Puerto dentro de Docker | Función | Acceso desde la computadora |
 | --- | ---: | --- | --- |
 | API | 4000 | Endpoint GraphQL | `API_PORT`, por defecto 4000 |
-| MySQL | 3306 | Usuarios, mascotas y módulos relacionales | Sin puerto publicado |
 | MongoDB | 27017 | Protocolo de base documental | `MONGO_PORT`, por defecto 27017 |
 | Redis Stack | 6379 | Caché y sesiones | `REDIS_PORT`, por defecto 6379 |
 | RedisInsight | 8001 | Interfaz gráfica de Redis incluida en Stack | `REDISINSIGHT_PORT`, por defecto 8001 |
@@ -65,7 +62,7 @@ En la computadora de desarrollo ya existían otros contenedores de clase.
 El `.env` local usa **27018, 6380, 8002, 7475 y 7688**, respectivamente. Dentro de
 Docker siguen usándose los puertos estándar. No se versiona ese `.env`.
 
-Los volúmenes `mysql_data`, `mongo_data`, `redis_data` y `neo4j_data` conservan datos
+Los volúmenes `mongo_data`, `mongo_keyfile`, `redis_data` y `neo4j_data` conservan datos
 al recrear contenedores. Redis usa AOF con `appendfsync always` para persistir
 escrituras, incluidas las revocaciones. MongoDB y Redis tienen healthchecks y la
 API espera a que estén disponibles. Neo4j tiene su propia comprobación de salud.
@@ -74,11 +71,14 @@ API espera a que estén disponibles. Neo4j tiene su propia comprobación de salu
 
 **MongoDB.** El historial médico se representa como documentos de eventos:
 consulta, vacunación o tratamiento, con descripción, fecha y observaciones.
-MongoDB es la fuente de verdad histórica de este módulo. Mongoose define y valida
-el esquema. Cada alta, modificación o eliminación de un documento es atómica;
-ese es el límite transaccional elegido para mantener simple este entregable.
-No se afirma que una operación entre MySQL, MongoDB y Redis sea una transacción
-única. El contador de IDs es atómico pero independiente y puede dejar huecos.
+MongoDB es la fuente persistente de todos los módulos. Mongoose define y valida
+sus esquemas. Las escrituras usan transacciones en el replica set de un nodo:
+validan referencias, actualizan documentos y asignan IDs dentro de la misma
+transacción. Un bloqueo documental común serializa las escrituras del laboratorio
+para impedir referencias huérfanas en operaciones concurrentes. Esto simplifica
+la integridad, aunque limita el rendimiento de escrituras a gran escala.
+La invalidación de Redis ocurre después del commit; MongoDB y Redis no forman
+una transacción distribuida. `mongo-setup` prepara `rs0` al iniciar Compose.
 
 **Redis Stack.** Los historiales consultados repetidamente se almacenan con TTL
 para reducir lecturas documentales. Las sesiones son datos temporales: se crean
@@ -101,10 +101,10 @@ erDiagram
     MASCOTA ||--o{ HISTORIAL_MEDICO : tiene
 ```
 
-`usuarios` y `perros` permanecen en MySQL. `perros.id_usuario` indica el dueño;
+`usuarios` y `perros` son colecciones en MongoDB. `perros.id_usuario` indica el dueño;
 se conserva el nombre técnico `perros` para no romper el contrato existente.
 MongoDB guarda `id_perro` en cada documento de historial. Ese identificador se
-valida contra MySQL antes de escribir o consultar información privada.
+valida contra MongoDB antes de escribir o consultar información privada.
 
 No se copia el dueño dentro de cada documento médico: se consulta la propiedad
 actual de la mascota. Esto permite que una cuenta administre Luna y Max sin
@@ -162,7 +162,7 @@ joins sucesivos. Los índices y restricciones siguen siendo útiles para localiz
 el usuario inicial; el término no significa que Neo4j no use índices.
 
 Los usuarios `demo-ana` y `demo-admin` de Neo4j son datos conceptuales. No son
-cuentas con contraseña y no se sincronizan automáticamente con MySQL.
+cuentas con contraseña y no se sincronizan automáticamente con MongoDB.
 El script de consultas también demuestra propiedad y denegación de acceso:
 [`docker/neo4j/consultas.cypher`](../docker/neo4j/consultas.cypher).
 
@@ -173,7 +173,7 @@ Colección `historiales_medicos`:
 | Campo | Tipo | Uso |
 | --- | --- | --- |
 | `id_historial` | Número entero único | Conserva el contrato GraphQL `Int` |
-| `id_perro` | Número entero | Mascota registrada en MySQL |
+| `id_perro` | Número entero | Mascota registrada en MongoDB |
 | `tipo_registro` | Texto obligatorio | Consulta, Vacunación, Tratamiento u otro tipo |
 | `descripcion` | Texto obligatorio | Evento registrado |
 | `fecha_registro` | Fecha | Fecha de creación; GraphQL muestra AAAA-MM-DD |
@@ -181,15 +181,13 @@ Colección `historiales_medicos`:
 
 Hay índice único en `id_historial` e índice compuesto en `id_perro, id_historial`.
 El modelo está en [`src/models/HistorialMedico.js`](../src/models/HistorialMedico.js).
-Las escrituras validan IDs, campos obligatorios y longitudes. La creación de
-historial y la eliminación de una mascota usan un bloqueo de la fila de la mascota
-en MySQL para no dejar un historial huérfano por una eliminación simultánea
-realizada a través de la API. No se puede borrar una mascota con historial.
+Las escrituras validan IDs, campos obligatorios y longitudes. Las transacciones
+validan la propiedad y las referencias antes de guardar o borrar. No se puede
+borrar una mascota con historial ni otros registros relacionados.
 
-La tabla SQL `historial_medico` queda como origen de importación para instalaciones
-anteriores; los resolvers ya no escriben allí. La importación es explícita,
-reanudable y rechaza IDs cuyo contenido entraría en conflicto. No elimina los
-registros SQL originales y no sincroniza dos fuentes.
+La importación de instalaciones antiguas se describe en
+[MIGRACION_MONGODB.md](MIGRACION_MONGODB.md). Conserva IDs, rechaza conflictos y
+revierte la importación completa si algún registro resulta incompatible.
 
 ### Agregación analítica
 
@@ -235,7 +233,7 @@ type Mutation {
 }
 ```
 
-El gateway une consultas de MySQL, MongoDB y Redis en el mismo contrato.
+El gateway une consultas de MongoDB y Redis en el mismo contrato.
 No se incorpora federación, microservicios adicionales ni una migración a Django
 en esta entrega. Los resolvers del historial viven en
 [`src/services/history.js`](../src/services/history.js).
@@ -243,7 +241,7 @@ en esta entrega. Los resolvers del historial viven en
 ## 8 Cache-Aside con TTL e invalidación
 
 La consulta cacheada es `historialesMedicos(id_perro: ...)`. Primero valida la
-propiedad en MySQL. Después usa `redisClient.get` con una clave por mascota,
+propiedad en MongoDB. Después usa `redisClient.get` con una clave por mascota,
 versión y página. En un miss lee MongoDB y ejecuta
 `redisClient.set(clave, JSON.stringify(datos), { EX: segundos })`.
 `HISTORY_CACHE_TTL` vale 60 segundos por defecto.
@@ -313,18 +311,9 @@ El comando muestra el correo, una contraseña aleatoria y los IDs de Luna y Max.
 Guarda esa salida localmente. No la pegues en archivos versionados. Si la cuenta
 ya existe, el comando no cambia su contraseña ni duplica los datos.
 
-Si tienes historial antiguo en MySQL, antes de empezar a escribir historial nuevo:
-
-```bash
-docker compose stop api
-docker compose run --rm --no-deps api npm run migrate:history
-docker compose up -d --wait
-```
-
-Haz primero un respaldo. El script no borra la tabla de origen; si se interrumpe,
-se puede repetir y omite documentos idénticos. No es una transacción global de
-importación: si encuentra un conflicto, conserva lo importado previamente y
-reporta el ID que necesita revisión.
+Para datos de instalaciones anteriores, sigue [MIGRACION_MONGODB.md](MIGRACION_MONGODB.md).
+No ejecutes el antiguo comando `migrate:history`: fue sustituido por una importación
+completa de todos los módulos.
 
 ## 11 Guion de demostración desde el IDE
 
@@ -499,7 +488,7 @@ misses y las lecturas posteriores a invalidación/expiración, sin descartar mue
   ni invalidación. La importación y las herramientas de mantenimiento se ejecutan
   con la API detenida cuando corresponda.
 - La API conserva controles de autorización, bcrypt, paginación, límites de
-  solicitudes, TLS para MySQL remoto y errores sin información sensible.
+  solicitudes y errores sin información sensible.
 - Docker Compose es un entorno local del parcial. Django, React y Android son
   otras etapas del proyecto; aquí se prepara el backend para poder consumirlo.
 

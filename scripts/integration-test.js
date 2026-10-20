@@ -7,7 +7,7 @@ const { once } = require('node:events');
 const { setTimeout: delay } = require('node:timers/promises');
 const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
-const db = require('../src/database/db');
+const db = require('../src/database/repository');
 const { hashPassword } = require('../src/security/auth');
 const { connectMongo, closeMongo } = require('../src/database/mongo');
 const { connectRedis, closeRedis, redisClient } = require('../src/database/redis');
@@ -49,7 +49,7 @@ async function login(correo, contrasena = 'local-test-password') {
 (async () => {
     try {
         await Promise.all([connectMongo(), connectRedis()]);
-        const [adminId] = await db('usuarios').insert({ nombre: 'Docker Admin Test', apellido: 'Temporal', correo: `admin-${run}@example.invalid`, contrasena: await hashPassword('local-test-password'), estado: 'activo' });
+        const {id_usuario:adminId} = await db.insert('usuarios',{ nombre: 'Docker Admin Test', apellido: 'Temporal', correo: `admin-${run}@example.invalid`, contrasena: await hashPassword('local-test-password'), estado: 'activo' });
         created.push({ table: 'usuarios', id: 'id_usuario', value: adminId });
         server = spawn(process.execPath, ['src/server.js'], { env: { ...process.env, PORT: '4001', ADMIN_USER_IDS: String(adminId) }, stdio: ['ignore', 'pipe', 'pipe'] });
         server.stdout.on('data', data => { output += data; });
@@ -66,7 +66,7 @@ async function login(correo, contrasena = 'local-test-password') {
         const outsider = await add('Usuario', 'usuarios', 'id_usuario', { nombre: 'Other', apellido: 'Test', correo: `other-${run}@example.invalid`, contrasena: 'local-test-password' });
         ownerToken = await login(ownerMail);
         outsiderToken = await login(`other-${run}@example.invalid`);
-        const stored = await db('usuarios').where(owner).first();
+        const stored = await db.one('usuarios',owner);
         assert.notEqual(stored.contrasena, 'local-test-password');
         assert.ok(await bcrypt.compare('local-test-password', stored.contrasena));
         await request('{ me { contrasena } }', ownerToken, 'GRAPHQL_VALIDATION_FAILED');
@@ -162,7 +162,7 @@ async function login(correo, contrasena = 'local-test-password') {
         await request(`mutation { updateUsuario(id_usuario:${owner.id_usuario},contrasena:"new-test-password") { id_usuario } }`, ownerToken);
         await request('{ me { id_usuario } }', ownerToken, 'UNAUTHENTICATED');
         ownerToken = await login(ownerMail, 'new-test-password');
-        await db('usuarios').where(owner).update({ estado: 'inactivo' });
+        await db.update('usuarios',owner,{ estado:'inactivo' });
         await request('{ me { id_usuario } }', ownerToken, 'UNAUTHENTICATED');
         await request(`mutation { login(correo:"${ownerMail}",contrasena:"new-test-password") { token } }`, undefined, 'UNAUTHENTICATED');
         let rateLimited = false;
@@ -192,11 +192,11 @@ async function login(correo, contrasena = 'local-test-password') {
                     if (keys.length) await redisClient.del(keys);
                     await redisClient.del([keysKey(item.value), versionKey(item.value)]);
                 }
-                await db(item.table).where(item.id, item.value).del();
+                await db.models[item.table].deleteOne({[item.id]:item.value});
             }
         }
         if (sessions.length) await redisClient.del(sessions.map(id => `sesion:${id}`));
-        await Promise.all([db.destroy(), closeMongo(), closeRedis()]);
+        await Promise.all([closeMongo(), closeRedis()]);
         console.log('Registros de prueba eliminados.');
     }
 })().catch(error => { console.error(error); process.exitCode = 1; });

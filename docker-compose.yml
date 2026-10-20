@@ -8,13 +8,7 @@ services:
       - "127.0.0.1:${API_PORT:-4000}:4000"
     environment:
       PORT: 4000
-      DB_HOST: db
-      DB_PORT: 3306
-      DB_USER: pawly
-      DB_PASSWORD: ${DB_PASSWORD:?Copia .env.example a .env y configura DB_PASSWORD}
-      DB_DATABASE: pawly
-      DB_SSL: "false"
-      MONGO_URI: mongodb://bda-mongodb:27017/pawly
+      MONGO_URI: mongodb://bda-mongodb:27017/pawly?replicaSet=rs0&directConnection=true
       MONGO_USER: pawly
       MONGO_PASSWORD: ${MONGO_PASSWORD:?Configura MONGO_PASSWORD en .env}
       REDIS_URL: redis://bda-redis-stack:6379
@@ -30,33 +24,17 @@ services:
         condition: service_healthy
       bda-redis-stack:
         condition: service_healthy
-      db:
-        condition: service_healthy
+      mongo-setup:
+        condition: service_completed_successfully
     healthcheck:
       test: ["CMD", "node", "docker/healthcheck.js"]
       interval: 15s
       timeout: 5s
       retries: 5
       start_period: 20s
-  db:
-    image: mysql:8.4
-    restart: unless-stopped
-    environment:
-      MYSQL_DATABASE: pawly
-      MYSQL_USER: pawly
-      MYSQL_PASSWORD: ${DB_PASSWORD:?Configura DB_PASSWORD en .env}
-      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:?Configura MYSQL_ROOT_PASSWORD en .env}
-    volumes:
-      - mysql_data:/var/lib/mysql
-      - ./docker/mysql/init:/docker-entrypoint-initdb.d:ro
-    healthcheck:
-      test: ["CMD-SHELL", "MYSQL_PWD=\"$$MYSQL_PASSWORD\" mysql --protocol=TCP -h 127.0.0.1 -u\"$$MYSQL_USER\" \"$$MYSQL_DATABASE\" -e 'SELECT 1 FROM publicaciones LIMIT 0' >/dev/null 2>&1"]
-      interval: 5s
-      timeout: 5s
-      retries: 30
-      start_period: 30s
   bda-mongodb:
     image: mongo:8.0
+    command: ["bash", "/mongo-start.sh"]
     restart: unless-stopped
     environment:
       MONGO_INITDB_ROOT_USERNAME: admin
@@ -66,6 +44,8 @@ services:
       - "127.0.0.1:${MONGO_PORT:-27017}:27017"
     volumes:
       - mongo_data:/data/db
+      - mongo_keyfile:/data/keyfile
+      - ./docker/mongo-start.sh:/mongo-start.sh:ro
       - ./docker/mongodb:/docker-entrypoint-initdb.d:ro
     healthcheck:
       test: ["CMD", "mongosh", "--quiet", "--eval", "db.getSiblingDB('pawly').auth('pawly', process.env.MONGO_PASSWORD); if (!db.getSiblingDB('pawly').runCommand({connectionStatus:1}).authInfo.authenticatedUsers.length) quit(1)"]
@@ -73,6 +53,17 @@ services:
       timeout: 10s
       retries: 20
       start_period: 30s
+  mongo-setup:
+    image: mongo:8.0
+    restart: "no"
+    depends_on:
+      bda-mongodb:
+        condition: service_healthy
+    environment:
+      MONGO_ROOT_PASSWORD: ${MONGO_ROOT_PASSWORD:?Configura MONGO_ROOT_PASSWORD}
+    volumes:
+      - ./docker/mongo-replica.js:/mongo-replica.js:ro
+    entrypoint: ["mongosh", "--host", "bda-mongodb", "--quiet", "/mongo-replica.js"]
   bda-redis-stack:
     image: redis/redis-stack:7.4.0-v8
     restart: unless-stopped
@@ -117,4 +108,4 @@ volumes:
   mongo_data:
   redis_data:
   neo4j_data:
-  mysql_data:
+  mongo_keyfile:

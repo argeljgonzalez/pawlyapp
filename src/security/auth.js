@@ -2,7 +2,7 @@ const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
 const { createHash, randomUUID } = require('node:crypto');
 const { redisClient, ttl } = require('../database/redis');
-const db = require('../database/db');
+const db = require('../database/repository');
 const { fail } = require('./errors');
 const version = hash => createHash('sha256').update(hash).digest('hex');
 const isHash = value => /^\$2[aby]\$\d{2}\$[./A-Za-z0-9]{53}$/.test(value || '');
@@ -43,7 +43,7 @@ async function contextForRequest(req) {
     try { session = await redisClient.get(`sesion:${payload.jti}`); }
     catch { fail('No se puede verificar la sesión. Inténtalo más tarde.', 'SERVICE_UNAVAILABLE'); }
     if (session !== String(payload.id_usuario)) fail('Sesión cerrada o vencida.', 'UNAUTHENTICATED');
-    const user = await db('usuarios').where({ id_usuario: payload.id_usuario }).first();
+    const user = await db.one('usuarios', { id_usuario: payload.id_usuario });
     if (!active(user) || payload.version !== version(user.contrasena)) fail('Sesión inválida.', 'UNAUTHENTICATED');
     context.jti = payload.jti;
     context.user = { id_usuario: user.id_usuario, isAdmin: admin(user.id_usuario) };

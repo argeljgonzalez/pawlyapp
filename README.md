@@ -1,8 +1,8 @@
 # PawlyApp API
 
 Backend de Pawly con Node.js, Apollo Server 5 y GraphQL. **Un usuario puede registrar
-varias mascotas**, cada una con su historial médico. MySQL conserva usuarios,
-mascotas y catálogos; MongoDB almacena los historiales; Redis Stack gestiona caché
+varias mascotas**, cada una con su historial médico. MongoDB almacena usuarios,
+mascotas, catálogos y los demás registros; Redis Stack gestiona caché
 y sesiones. Neo4j contiene el modelo RBAC conceptual del Segundo Parcial.
 
 La documentación del examen, diagramas, puertos, Cypher, SDL, agregación y guía de
@@ -16,7 +16,7 @@ Requisito: Docker Desktop o Docker Engine con Compose en ejecución.
 git clone https://github.com/argeljgonzalez/pawlyapp.git
 cd pawlyapp
 # Selecciona la rama del parcial cuando esté publicada.
-git switch feature/parcial2-nosql-sesiones
+git switch feature/backend-mongodb
 cp .env.example .env
 # Cambia las contraseñas y JWT_SECRET por valores propios.
 docker compose up -d --build --wait
@@ -55,7 +55,6 @@ localmente, nunca en Git. La repetición no reinicia ni duplica una cuenta demo.
 | Variable | Uso |
 | --- | --- |
 | `API_PORT` | Puerto local de la API (4000) |
-| `DB_PASSWORD`, `MYSQL_ROOT_PASSWORD` | Acceso MySQL local |
 | `MONGO_PASSWORD`, `MONGO_ROOT_PASSWORD` | Usuario de aplicación y administrador MongoDB |
 | `REDIS_PASSWORD` | Contraseña Redis; usa una clave alfanumérica larga sin espacios |
 | `NEO4J_PASSWORD` | Contraseña de `neo4j` |
@@ -93,6 +92,7 @@ El historial admite `id_perro` para consultar y cachear una mascota. El reporte
 ```bash
 docker compose exec api npm test
 docker compose exec api npm run test:integration
+docker compose exec api npm run test:mongo
 docker compose exec api npm audit --omit=dev
 docker compose logs --tail=100 api
 docker compose ps
@@ -110,21 +110,21 @@ docker compose up -d --build --wait
 ```
 
 `docker compose down -v` **borra todos los volúmenes del proyecto**; no lo uses si
-quieres conservar los datos. Los scripts de inicialización SQL/Mongo se ejecutan
+quieres conservar los datos. Los scripts de inicialización Mongo se ejecutan
 solo sobre volúmenes nuevos.
 
-Para una base anterior, respalda primero y sigue las instrucciones de
-`npm run migrate:passwords` (contraseñas SQL en texto plano) y
-`npm run migrate:history` (historial SQL a MongoDB) en la guía del parcial.
-La importación no borra el origen ni se ejecuta automáticamente.
+Para migrar una instalación anterior, consulta [docs/MIGRACION_MONGODB.md](docs/MIGRACION_MONGODB.md).
+La importación conserva IDs y contraseñas, no borra el origen y rechaza conflictos.
+`npm run migrate:passwords` convierte contraseñas antiguas en MongoDB a bcrypt.
 
 ## Ejecución sin Docker
 
-Necesitas Node.js 22+, MySQL, MongoDB y Redis. Configura `DB_HOST`, `DB_PORT`,
-`DB_USER`, `DB_PASSWORD`, `DB_DATABASE`, `MONGO_URI`, `MONGO_USER`, `MONGO_PASSWORD`,
-`REDIS_URL`, `REDIS_PASSWORD`, `JWT_SECRET` y opcionalmente `PORT`.
-Para MongoDB se usa la base/autenticación `pawly`. MySQL remoto verifica TLS;
-usa `DB_SSL_CA` si necesitas una CA privada. `DB_SSL=false` es para MySQL local.
+Necesitas Node.js 22+, MongoDB 8 con replica set y Redis. Configura `MONGO_URI`,
+`MONGO_USER`, `MONGO_PASSWORD`, `REDIS_URL`, `REDIS_PASSWORD`, `JWT_SECRET` y
+opcionalmente `PORT`. La base y autenticación predeterminadas son `pawly`.
+La URI debe apuntar a un primario y configurar `replicaSet=rs0`.
+Compose prepara automáticamente el replica set de un nodo mediante `mongo-setup`.
+Es necesario para transacciones; no proporciona alta disponibilidad.
 
 ```bash
 npm ci

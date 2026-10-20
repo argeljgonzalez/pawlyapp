@@ -11,7 +11,6 @@ const { GraphQLError } = require('graphql');
 const { contextForRequest } = require('./security/auth');
 const typeDefs = require('./graphql/typeDefs');
 const resolvers = require('./graphql/resolvers');
-const db = require('./database/db');
 const { connectMongo, closeMongo, mongoose } = require('./database/mongo');
 const { connectRedis, closeRedis, redisClient } = require('./database/redis');
 const { ApolloServerPluginLandingPageLocalDefault, ApolloServerPluginLandingPageDisabled } = require('@apollo/server/plugin/landingPage/default');
@@ -41,14 +40,11 @@ function formatError(error) {
     const safe = ['BAD_USER_INPUT', 'UNAUTHENTICATED', 'FORBIDDEN', 'NOT_FOUND', 'RATE_LIMITED', 'CONFLICT', 'SERVICE_UNAVAILABLE'];
     if (safe.includes(code)) return { message: error.message, extensions: { code } };
     if (['GRAPHQL_PARSE_FAILED', 'GRAPHQL_VALIDATION_FAILED'].includes(code)) return { message: 'Consulta GraphQL inválida.', extensions: { code } };
-    // SQL, traces and input values must never be returned to the client.
+    // Database details, traces and input values must never be returned to the client.
     return { message: 'No se pudo completar la operación. Revisa los datos y sus relaciones.', extensions: { code: 'INTERNAL_SERVER_ERROR' } };
 }
 async function start() {
     if (!process.env.JWT_SECRET || Buffer.byteLength(process.env.JWT_SECRET) < 32) throw new Error('Configura JWT_SECRET con al menos 32 bytes.');
-    for (const key of ['DB_HOST', 'DB_USER', 'DB_PASSWORD', 'DB_DATABASE', 'DB_PORT']) {
-        if (!process.env[key]) throw new Error(`Falta configurar ${key}.`);
-    }
     const app = express();
     const httpServer = http.createServer(app);
     app.disable('x-powered-by');
@@ -60,7 +56,7 @@ async function start() {
     await Promise.all([connectMongo(), connectRedis()]);
     app.get('/health', async (req, res) => {
         try {
-            await Promise.all([db.raw('SELECT 1'), mongoose.connection.db.command({ ping: 1 }), redisClient.ping()]);
+            await Promise.all([mongoose.connection.db.command({ ping: 1 }), redisClient.ping()]);
             res.json({ status: 'ok' });
         } catch { res.status(503).json({ status: 'unavailable' }); }
     });
@@ -71,7 +67,7 @@ async function start() {
         allowBatchedHttpRequests: false,
         formatError,
         plugins: [sandbox ? ApolloServerPluginLandingPageLocalDefault({ embed: true }) : ApolloServerPluginLandingPageDisabled(), operationLimit, ApolloServerPluginDrainHttpServer({ httpServer }), {
-            async serverWillStart() { return { async drainServer() { await Promise.all([db.destroy(), closeMongo(), closeRedis()]); } }; }
+            async serverWillStart() { return { async drainServer() { await Promise.all([closeMongo(), closeRedis()]); } }; }
         }]
     });
     await server.start();

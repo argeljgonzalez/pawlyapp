@@ -6,49 +6,19 @@ const { protect, limitAuth } = require('../../security/access');
 const { validate } = require('../../security/validation');
 const { fail } = require('../../security/errors');
 const dummyHash = bcrypt.hash('invalid-login-placeholder', 12);
-const db = require('../../database/db');
+const db = require('../../database/repository');
 
-const cleanData = (data) => {
-    return Object.fromEntries(
-        Object.entries(data).filter(([key, value]) => value !== undefined)
-    );
+const findOne = (table, idField, idValue, fields = '*') => db.one(table,{[idField]:idValue},fields);
+const insertAndReturn = async (table,idField,data,fields='*') => {
+    const row=await db.insert(table,data);
+    return findOne(table,idField,row[idField],fields);
 };
-
-const hasData = (data) => {
-    return Object.keys(data).length > 0;
+const updateAndReturn = async (table,idField,idValue,data,fields='*') => {
+    await db.update(table,{[idField]:idValue},data);
+    return findOne(table,idField,idValue,fields);
 };
-
-const findOne = async (table, idField, idValue, selectFields = '*') => {
-    return await db(table)
-        .select(selectFields)
-        .where({ [idField]: idValue })
-        .first();
-};
-
-const insertAndReturn = async (table, idField, data, selectFields = '*') => {
-    const [id] = await db(table).insert(data);
-    return await findOne(table, idField, id, selectFields);
-};
-
-const updateAndReturn = async (table, idField, idValue, data, selectFields = '*') => {
-    const clean = cleanData(data);
-
-    if (hasData(clean)) {
-        await db(table)
-            .where({ [idField]: idValue })
-            .update(clean);
-    }
-
-    const result = await findOne(table, idField, idValue, selectFields);
-    if (!result) fail('Registro no disponible.', 'NOT_FOUND');
-    return result;
-};
-
-const deleteById = async (table, idField, idValue, message) => {
-    const deleted = await db(table).where({ [idField]: idValue }).del();
-    if (!deleted) fail('Registro no disponible.', 'NOT_FOUND');
-
-    return message;
+const deleteById = async (table,idField,idValue,message) => {
+    await db.remove(table,{[idField]:idValue}); return message;
 };
 
 const usuarioFields = [
@@ -57,7 +27,7 @@ const usuarioFields = [
     'apellido',
     'correo',
     'telefono',
-    db.raw("DATE_FORMAT(fecha_registro, '%Y-%m-%d %H:%i:%s') as fecha_registro"),
+    'fecha_registro',
     'estado'
 ];
 
@@ -80,8 +50,8 @@ const perroFields = [
     'sexo',
     'peso',
     'color',
-    db.raw("DATE_FORMAT(fecha_nacimiento, '%Y-%m-%d') as fecha_nacimiento"),
-    db.raw("DATE_FORMAT(fecha_registro, '%Y-%m-%d %H:%i:%s') as fecha_registro")
+    'fecha_nacimiento',
+    'fecha_registro'
 ];
 
 const ubicacionFields = [
@@ -89,7 +59,7 @@ const ubicacionFields = [
     'id_perro',
     'latitud',
     'longitud',
-    db.raw("DATE_FORMAT(fecha_hora, '%Y-%m-%d %H:%i:%s') as fecha_hora"),
+    'fecha_hora',
     'estado'
 ];
 
@@ -105,14 +75,14 @@ const recordatorioFields = [
     'id_tipo_recordatorio',
     'titulo',
     'descripcion',
-    db.raw("DATE_FORMAT(fecha_programada, '%Y-%m-%d %H:%i:%s') as fecha_programada"),
+    'fecha_programada',
     'estado'
 ];
 
 const cartillaVacunacionFields = [
     'id_cartilla',
     'id_perro',
-    db.raw("DATE_FORMAT(fecha_creacion, '%Y-%m-%d') as fecha_creacion"),
+    'fecha_creacion',
     'observaciones_generales',
     'estado'
 ];
@@ -129,8 +99,8 @@ const cartillaDetalleFields = [
     'id_detalle_cartilla',
     'id_cartilla',
     'id_vacuna',
-    db.raw("DATE_FORMAT(fecha_aplicacion, '%Y-%m-%d') as fecha_aplicacion"),
-    db.raw("DATE_FORMAT(proxima_dosis, '%Y-%m-%d') as proxima_dosis"),
+    'fecha_aplicacion',
+    'proxima_dosis',
     'veterinaria',
     'veterinario',
     'lote_vacuna',
@@ -141,7 +111,7 @@ const cartillaDetalleFields = [
 const citaVeterinariaFields = [
     'id_cita',
     'id_perro',
-    db.raw("DATE_FORMAT(fecha_cita, '%Y-%m-%d %H:%i:%s') as fecha_cita"),
+    'fecha_cita',
     'veterinaria',
     'motivo',
     'diagnostico',
@@ -154,7 +124,7 @@ const publicacionFields = [
     'id_usuario',
     'titulo',
     'contenido',
-    db.raw("DATE_FORMAT(fecha_publicacion, '%Y-%m-%d %H:%i:%s') as fecha_publicacion"),
+    'fecha_publicacion',
     'estado'
 ];
 
@@ -183,7 +153,7 @@ const resolvers = {
             await limitAuth(context.ip);
             ({ correo } = validate({ correo }));
             if (Buffer.byteLength(contrasena, 'utf8') > 72) fail('Correo o contraseña incorrectos.', 'UNAUTHENTICATED');
-            const usuario = await db('usuarios').select([...usuarioFields, 'contrasena']).where({ correo }).first();
+            const usuario = await db.one('usuarios', { correo }, [...usuarioFields, 'contrasena']);
             const validHash = isHash(usuario?.contrasena);
             const matches = await bcrypt.compare(contrasena, validHash ? usuario.contrasena : await dummyHash);
             if (!matches || !validHash || !active(usuario)) fail('Correo o contraseña incorrectos.', 'UNAUTHENTICATED');
@@ -270,16 +240,8 @@ const resolvers = {
             }, perroFields);
         },
 
-        deletePerro: async (_, { id_perro }, context) => {
-            return db.transaction(async trx => {
-                await require('../../services/history').allowedDogs(context, id_perro, trx, true);
-                if (await require('../../models/HistorialMedico').Historial.exists({ id_perro })) {
-                    fail('La mascota tiene historial médico. Elimina primero sus registros.', 'CONFLICT');
-                }
-                const deleted = await trx('perros').where({ id_perro }).del();
-                if (!deleted) fail('Registro no disponible.', 'NOT_FOUND');
-                return `Perro con id ${id_perro} eliminado`;
-            });
+        deletePerro: async (_, { id_perro }) => {
+            return deleteById('perros','id_perro',id_perro,`Perro con id ${id_perro} eliminado`);
         },
 
         addUbicacion: async (_, { id_perro, latitud, longitud, estado }) => {
@@ -487,7 +449,7 @@ const secured = protect(resolvers, [
     { entity: 'CitaVeterinaria', list: 'citasVeterinarias', one: 'citaVeterinaria', table: 'citas_veterinarias', id: 'id_cita', fields: citaVeterinariaFields, public: false, required: ["id_perro", "fecha_cita", "veterinaria", "motivo"] },
     { entity: 'Publicacion', list: 'publicaciones', one: 'publicacion', table: 'publicaciones', id: 'id_publicacion', fields: publicacionFields, public: false, required: ["id_usuario", "titulo", "contenido"] }
 ]);
-// El historial usa MongoDB y verifica la propiedad de las mascotas en MySQL.
+// El historial usa MongoDB y verifica la propiedad de las mascotas en MongoDB.
 const history = require('../../services/history');
 Object.assign(secured.Query, history.Query);
 Object.assign(secured.Mutation, history.Mutation);
