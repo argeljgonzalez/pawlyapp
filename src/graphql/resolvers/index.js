@@ -1,6 +1,11 @@
 require('dotenv').config();
 
-const jwt = require('jsonwebtoken');
+const bcrypt = require('bcryptjs');
+const { hashPassword, generateToken, isHash, active } = require('../../security/auth');
+const { protect, limitAuth } = require('../../security/access');
+const { validate } = require('../../security/validation');
+const { fail } = require('../../security/errors');
+const dummyHash = bcrypt.hash('invalid-login-placeholder', 12);
 const db = require('../../database/db');
 
 const cleanData = (data) => {
@@ -11,19 +16,6 @@ const cleanData = (data) => {
 
 const hasData = (data) => {
     return Object.keys(data).length > 0;
-};
-
-const generateToken = (usuario) => {
-    return jwt.sign(
-        {
-            id_usuario: usuario.id_usuario,
-            correo: usuario.correo
-        },
-        process.env.JWT_SECRET,
-        {
-            expiresIn: '1h'
-        }
-    );
 };
 
 const findOne = async (table, idField, idValue, selectFields = '*') => {
@@ -47,13 +39,14 @@ const updateAndReturn = async (table, idField, idValue, data, selectFields = '*'
             .update(clean);
     }
 
-    return await findOne(table, idField, idValue, selectFields);
+    const result = await findOne(table, idField, idValue, selectFields);
+    if (!result) fail('Registro no disponible.', 'NOT_FOUND');
+    return result;
 };
 
 const deleteById = async (table, idField, idValue, message) => {
-    await db(table)
-        .where({ [idField]: idValue })
-        .del();
+    const deleted = await db(table).where({ [idField]: idValue }).del();
+    if (!deleted) fail('Registro no disponible.', 'NOT_FOUND');
 
     return message;
 };
@@ -63,7 +56,6 @@ const usuarioFields = [
     'nombre',
     'apellido',
     'correo',
-    'contrasena',
     'telefono',
     db.raw("DATE_FORMAT(fecha_registro, '%Y-%m-%d %H:%i:%s') as fecha_registro"),
     'estado'
@@ -179,7 +171,7 @@ const resolvers = {
     Query: {
         me: async (_, __, context) => {
             if (!context.user) {
-                throw new Error('No autorizado. Debes iniciar sesión.');
+                fail('Debes iniciar sesión.', 'UNAUTHENTICATED');
             }
 
             return await findOne(
@@ -190,127 +182,24 @@ const resolvers = {
             );
         },
 
-        usuarios: async () => {
-            return await db('usuarios').select(usuarioFields);
-        },
-
-        usuario: async (_, { id_usuario }) => {
-            return await findOne('usuarios', 'id_usuario', id_usuario, usuarioFields);
-        },
-
-        razas: async () => {
-            return await db('razas').select(razaFields);
-        },
-
-        raza: async (_, { id_raza }) => {
-            return await findOne('razas', 'id_raza', id_raza, razaFields);
-        },
-
-        perros: async () => {
-            return await db('perros').select(perroFields);
-        },
-
-        perro: async (_, { id_perro }) => {
-            return await findOne('perros', 'id_perro', id_perro, perroFields);
-        },
-
-        ubicaciones: async () => {
-            return await db('ubicaciones').select(ubicacionFields);
-        },
-
-        ubicacion: async (_, { id_ubicacion }) => {
-            return await findOne('ubicaciones', 'id_ubicacion', id_ubicacion, ubicacionFields);
-        },
-
-        tiposRecordatorio: async () => {
-            return await db('tipos_recordatorio').select(tipoRecordatorioFields);
-        },
-
-        tipoRecordatorio: async (_, { id_tipo_recordatorio }) => {
-            return await findOne('tipos_recordatorio', 'id_tipo_recordatorio', id_tipo_recordatorio, tipoRecordatorioFields);
-        },
-
-        recordatorios: async () => {
-            return await db('recordatorios').select(recordatorioFields);
-        },
-
-        recordatorio: async (_, { id_recordatorio }) => {
-            return await findOne('recordatorios', 'id_recordatorio', id_recordatorio, recordatorioFields);
-        },
-
-        cartillasVacunacion: async () => {
-            return await db('cartillas_vacunacion').select(cartillaVacunacionFields);
-        },
-
-        cartillaVacunacion: async (_, { id_cartilla }) => {
-            return await findOne('cartillas_vacunacion', 'id_cartilla', id_cartilla, cartillaVacunacionFields);
-        },
-
-        vacunas: async () => {
-            return await db('vacunas').select(vacunaFields);
-        },
-
-        vacuna: async (_, { id_vacuna }) => {
-            return await findOne('vacunas', 'id_vacuna', id_vacuna, vacunaFields);
-        },
-
-        cartillaDetalles: async () => {
-            return await db('cartilla_detalle').select(cartillaDetalleFields);
-        },
-
-        cartillaDetalle: async (_, { id_detalle_cartilla }) => {
-            return await findOne('cartilla_detalle', 'id_detalle_cartilla', id_detalle_cartilla, cartillaDetalleFields);
-        },
-
-        citasVeterinarias: async () => {
-            return await db('citas_veterinarias').select(citaVeterinariaFields);
-        },
-
-        citaVeterinaria: async (_, { id_cita }) => {
-            return await findOne('citas_veterinarias', 'id_cita', id_cita, citaVeterinariaFields);
-        },
-
-        historialesMedicos: async () => {
-            return await db('historial_medico').select(historialMedicoFields);
-        },
-
-        historialMedico: async (_, { id_historial }) => {
-            return await findOne('historial_medico', 'id_historial', id_historial, historialMedicoFields);
-        },
-
-        publicaciones: async () => {
-            return await db('publicaciones').select(publicacionFields);
-        },
-
-        publicacion: async (_, { id_publicacion }) => {
-            return await findOne('publicaciones', 'id_publicacion', id_publicacion, publicacionFields);
-        }
+        // El resto de las consultas se construye con el filtro de propietario
+        // y la paginación definidos en security/access.js.
     },
 
     Mutation: {
-        login: async (_, { correo, contrasena }) => {
-            const usuario = await db('usuarios')
-                .select(usuarioFields)
-                .where({ correo })
-                .first();
-
-            if (!usuario) {
-                throw new Error('Usuario no encontrado.');
-            }
-
-            if (usuario.contrasena !== contrasena) {
-                throw new Error('Contraseña incorrecta.');
-            }
-
-            const token = generateToken(usuario);
-
-            return {
-                token,
-                usuario
-            };
+        login: async (_, { correo, contrasena }, context) => {
+            await limitAuth(context.ip);
+            ({ correo } = validate({ correo }));
+            if (Buffer.byteLength(contrasena, 'utf8') > 72) fail('Correo o contraseña incorrectos.', 'UNAUTHENTICATED');
+            const usuario = await db('usuarios').select([...usuarioFields, 'contrasena']).where({ correo }).first();
+            const validHash = isHash(usuario?.contrasena);
+            const matches = await bcrypt.compare(contrasena, validHash ? usuario.contrasena : await dummyHash);
+            if (!matches || !validHash || !active(usuario)) fail('Correo o contraseña incorrectos.', 'UNAUTHENTICATED');
+            return { token: generateToken(usuario), usuario };
         },
 
         addUsuario: async (_, { nombre, apellido, correo, contrasena, telefono, estado }) => {
+            contrasena = await hashPassword(contrasena);
             return await insertAndReturn('usuarios', 'id_usuario', {
                 nombre,
                 apellido,
@@ -322,6 +211,7 @@ const resolvers = {
         },
 
         updateUsuario: async (_, { id_usuario, nombre, apellido, correo, contrasena, telefono, estado }) => {
+            if (contrasena !== undefined) contrasena = await hashPassword(contrasena);
             return await updateAndReturn('usuarios', 'id_usuario', id_usuario, {
                 nombre,
                 apellido,
@@ -606,4 +496,17 @@ const resolvers = {
     }
 };
 
-module.exports = resolvers;
+module.exports = protect(resolvers, [
+    { entity: 'Usuario', list: 'usuarios', one: 'usuario', table: 'usuarios', id: 'id_usuario', fields: usuarioFields, public: false, required: ["nombre", "apellido", "correo", "contrasena"] },
+    { entity: 'Raza', list: 'razas', one: 'raza', table: 'razas', id: 'id_raza', fields: razaFields, public: true, required: ["nombre_raza", "tamano"] },
+    { entity: 'Perro', list: 'perros', one: 'perro', table: 'perros', id: 'id_perro', fields: perroFields, public: false, required: ["id_usuario", "id_raza", "nombre", "sexo"] },
+    { entity: 'Ubicacion', list: 'ubicaciones', one: 'ubicacion', table: 'ubicaciones', id: 'id_ubicacion', fields: ubicacionFields, public: false, required: ["id_perro", "latitud", "longitud"] },
+    { entity: 'TipoRecordatorio', list: 'tiposRecordatorio', one: 'tipoRecordatorio', table: 'tipos_recordatorio', id: 'id_tipo_recordatorio', fields: tipoRecordatorioFields, public: true, required: ["nombre_tipo"] },
+    { entity: 'Recordatorio', list: 'recordatorios', one: 'recordatorio', table: 'recordatorios', id: 'id_recordatorio', fields: recordatorioFields, public: false, required: ["id_perro", "id_tipo_recordatorio", "titulo", "fecha_programada"] },
+    { entity: 'CartillaVacunacion', list: 'cartillasVacunacion', one: 'cartillaVacunacion', table: 'cartillas_vacunacion', id: 'id_cartilla', fields: cartillaVacunacionFields, public: false, required: ["id_perro"] },
+    { entity: 'Vacuna', list: 'vacunas', one: 'vacuna', table: 'vacunas', id: 'id_vacuna', fields: vacunaFields, public: true, required: ["nombre_vacuna"] },
+    { entity: 'CartillaDetalle', list: 'cartillaDetalles', one: 'cartillaDetalle', table: 'cartilla_detalle', id: 'id_detalle_cartilla', fields: cartillaDetalleFields, public: false, required: ["id_cartilla", "id_vacuna"] },
+    { entity: 'CitaVeterinaria', list: 'citasVeterinarias', one: 'citaVeterinaria', table: 'citas_veterinarias', id: 'id_cita', fields: citaVeterinariaFields, public: false, required: ["id_perro", "fecha_cita", "veterinaria", "motivo"] },
+    { entity: 'HistorialMedico', list: 'historialesMedicos', one: 'historialMedico', table: 'historial_medico', id: 'id_historial', fields: historialMedicoFields, public: false, required: ["id_perro", "tipo_registro", "descripcion"] },
+    { entity: 'Publicacion', list: 'publicaciones', one: 'publicacion', table: 'publicaciones', id: 'id_publicacion', fields: publicacionFields, public: false, required: ["id_usuario", "titulo", "contenido"] }
+]);

@@ -1,12 +1,9 @@
-const { gql } = require('apollo-server');
-
-const typeDefs = gql`
+const typeDefs = `
     type Usuario {
         id_usuario: Int!
         nombre: String
         apellido: String
         correo: String
-        contrasena: String
         telefono: String
         fecha_registro: String
         estado: String
@@ -124,41 +121,41 @@ const typeDefs = gql`
     }
 
     type Query {
-        usuarios: [Usuario]
+        usuarios(limit: Int = 50, offset: Int = 0): [Usuario]
         usuario(id_usuario: Int!): Usuario
         me: Usuario
 
-        razas: [Raza]
+        razas(limit: Int = 50, offset: Int = 0): [Raza]
         raza(id_raza: Int!): Raza
 
-        perros: [Perro]
+        perros(limit: Int = 50, offset: Int = 0): [Perro]
         perro(id_perro: Int!): Perro
 
-        ubicaciones: [Ubicacion]
+        ubicaciones(limit: Int = 50, offset: Int = 0): [Ubicacion]
         ubicacion(id_ubicacion: Int!): Ubicacion
 
-        tiposRecordatorio: [TipoRecordatorio]
+        tiposRecordatorio(limit: Int = 50, offset: Int = 0): [TipoRecordatorio]
         tipoRecordatorio(id_tipo_recordatorio: Int!): TipoRecordatorio
 
-        recordatorios: [Recordatorio]
+        recordatorios(limit: Int = 50, offset: Int = 0): [Recordatorio]
         recordatorio(id_recordatorio: Int!): Recordatorio
 
-        cartillasVacunacion: [CartillaVacunacion]
+        cartillasVacunacion(limit: Int = 50, offset: Int = 0): [CartillaVacunacion]
         cartillaVacunacion(id_cartilla: Int!): CartillaVacunacion
 
-        vacunas: [Vacuna]
+        vacunas(limit: Int = 50, offset: Int = 0): [Vacuna]
         vacuna(id_vacuna: Int!): Vacuna
 
-        cartillaDetalles: [CartillaDetalle]
+        cartillaDetalles(limit: Int = 50, offset: Int = 0): [CartillaDetalle]
         cartillaDetalle(id_detalle_cartilla: Int!): CartillaDetalle
 
-        citasVeterinarias: [CitaVeterinaria]
+        citasVeterinarias(limit: Int = 50, offset: Int = 0): [CitaVeterinaria]
         citaVeterinaria(id_cita: Int!): CitaVeterinaria
 
-        historialesMedicos: [HistorialMedico]
+        historialesMedicos(limit: Int = 50, offset: Int = 0): [HistorialMedico]
         historialMedico(id_historial: Int!): HistorialMedico
 
-        publicaciones: [Publicacion]
+        publicaciones(limit: Int = 50, offset: Int = 0): [Publicacion]
         publicacion(id_publicacion: Int!): Publicacion
     }
 
